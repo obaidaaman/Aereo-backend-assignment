@@ -6,3 +6,6 @@ pydantic
 sqlalchemy
 pillow
 tenacity
+psycopg[binary]
+psycopg2-binary
+python-dotenv

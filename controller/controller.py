@@ -6,11 +6,12 @@ from sqlalchemy.orm import Session
 from models.models import CertificateModel, Recipient
 from database.models import Job, Certificate
 from database.db import SessionLocal
-from celery_worker import celery_generate_certificate
+from celery_worker import master_certificate_generator
 from utils import robust_draw_certificate
 from fastapi.responses import FileResponse
 from fastapi.responses import FileResponse
-
+from dotenv import load_dotenv
+load_dotenv()
 
 def generate_certificate_controller(data: CertificateModel, background_tasks: BackgroundTasks, db: Session):
     job_id = str(uuid.uuid4())
@@ -31,12 +32,18 @@ def generate_certificate_controller(data: CertificateModel, background_tasks: Ba
         )
         
     
-    redis_client = redis.Redis(host='localhost', port=6379, db=0, socket_connect_timeout=2)
+
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    # redis-py requires ssl_cert_reqs passed as a kwarg when using rediss://
+    if "rediss://" in redis_url:
+        redis_client = redis.from_url(redis_url, ssl_cert_reqs="none", socket_connect_timeout=2)
+    else:
+        redis_client = redis.from_url(redis_url, socket_connect_timeout=2)
     try:
         redis_client.ping()
         print("REDIS is UP!")
         
-        celery_generate_certificate.delay(data.model_dump(), job_id)
+        master_certificate_generator.delay(data.model_dump(), job_id)
 
     except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError):
         print("Redis is DOWN!")
@@ -93,7 +100,7 @@ def generate_certificate(data: CertificateModel, job_id: str):
                 cert_record.file_url = file_name 
                 
             except Exception as e:
-                # Fail hone par FAILED update
+               
                 cert_record.status = "FAILED"
                 cert_record.error_message = str(e)
             
