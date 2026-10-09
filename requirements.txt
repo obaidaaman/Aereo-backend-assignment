@@ -1,0 +1,8 @@
+fastapi
+redis
+celery
+uvicorn
+pydantic
+sqlalchemy
+pillow
+tenacity
