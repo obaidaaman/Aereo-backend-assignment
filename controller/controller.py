@@ -32,9 +32,10 @@ def generate_certificate_controller(data: CertificateModel, background_tasks: Ba
         )
         
     
+    #  "redis://localhost:6379/0"
 
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    # redis-py requires ssl_cert_reqs passed as a kwarg when using rediss://
+   
     if "rediss://" in redis_url:
         redis_client = redis.from_url(redis_url, ssl_cert_reqs="none", socket_connect_timeout=2)
     else:
@@ -56,6 +57,8 @@ def generate_certificate_controller(data: CertificateModel, background_tasks: Ba
     }
 
 
+import concurrent.futures
+
 def generate_certificate(data: CertificateModel, job_id: str):
     os.makedirs("certificates", exist_ok=True)
     db = SessionLocal()
@@ -69,10 +72,10 @@ def generate_certificate(data: CertificateModel, job_id: str):
             db.commit()
 
         recipients: list[Recipient] = data.recipients
+        cert_records_data = []
 
-        for i, recipient in enumerate(recipients):
-            print(f"Processing recipient {i+1}: {recipient.name}")
-            
+        # Step 1: Pre-create all certificates in DB synchronously
+        for recipient in recipients:
             cert_record = Certificate(
                 job_id=job_id,
                 recipient_name=recipient.name,
@@ -80,41 +83,54 @@ def generate_certificate(data: CertificateModel, job_id: str):
                 status="PROCESSING"
             )
             db.add(cert_record)
-            db.commit() 
+            db.commit()
+            db.refresh(cert_record)
+            cert_records_data.append((recipient, str(cert_record.id)))
 
+        # Call Function for for thread
+        def draw_cert(recipient, cert_id):
+            file_name = f"certificates/cert_{cert_id}.png"
             try:
-              
-                file_name = f"certificates/cert_{cert_record.id}.png"
-                
-              
                 robust_draw_certificate(
                     name=recipient.name,
                     achievement=data.event_name,
                     date=data.date, 
-                    certificate_id=cert_record.id,
+                    certificate_id=cert_id,
                     output_path=file_name
                 )
-                
-                # Success hone par status update
-                cert_record.status = "SUCCESS"
-                cert_record.file_url = file_name 
-                
+                return cert_id, "SUCCESS", file_name, None
             except Exception as e:
-               
-                cert_record.status = "FAILED"
-                cert_record.error_message = str(e)
-            
-            db.commit()
+                return cert_id, "FAILED", None, str(e)
 
-        # Job complete ho jaane par final status check
+        
+        print(f"Starting parallel generation for {len(cert_records_data)} certificates...")
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            
+            futures = [executor.submit(draw_cert, rec, cid) for rec, cid in cert_records_data]
+            
+           
+            for future in concurrent.futures.as_completed(futures):
+                results.append(future.result())
+
+       
+        for cert_id, status, file_name, error_message in results:
+            cert = db.query(Certificate).filter(Certificate.id == cert_id).first()
+            if cert:
+                cert.status = status
+                if status == "SUCCESS":
+                    cert.file_url = file_name
+                else:
+                    cert.error_message = error_message
+        db.commit()
+
+      
         if job:
             failed_count = db.query(Certificate).filter(Certificate.job_id == job_id, Certificate.status == "FAILED").count()
-            
             if failed_count > 0:
                 job.status = "PARTIALLY_FAILED"
             else:
                 job.status = "COMPLETED"
-                
             db.commit()
 
         print(f"Processing completed for job {job_id}")
