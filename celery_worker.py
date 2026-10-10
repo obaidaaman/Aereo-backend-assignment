@@ -4,7 +4,7 @@ from database.models import Job, Certificate
 from database.db import SessionLocal
 from celery import chord
 from dotenv import load_dotenv
-
+from utils import upload_certificate_to_cloud
 load_dotenv()
 
 from utils import robust_draw_certificate
@@ -42,8 +42,11 @@ def celery_generate_single_certificate(self, job_id: str, event_name: str, date:
             output_path=file_name
         )
         
+        
+        final_file_url = upload_certificate_to_cloud(file_name, f"cert_{cert_record.id}.png")
+        
         cert_record.status = "SUCCESS"
-        cert_record.file_url = file_name
+        cert_record.file_url = final_file_url
         db.commit()
         return {
             "name" : recipient_dict['name'],

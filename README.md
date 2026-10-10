@@ -2,6 +2,11 @@
 
 This repository contains a backend service designed to handle bulk certificate generation asynchronously. 
 
+**🟢 LIVE DEMO:** The application is live and can be fully tested via the interactive Swagger API documentation here:  
+👉 **[https://aereo-backend-assignment.onrender.com/docs](https://aereo-backend-assignment.onrender.com/docs)**
+
+*(Note: The application is deployed on a Free Tier Render instance. It may take 30-50 seconds to wake up from a cold start upon your first request.)*
+
 ## How to set up the project
 
 ### Prerequisites
@@ -9,6 +14,7 @@ This repository contains a backend service designed to handle bulk certificate g
 - `uv` package manager (or standard `pip`)
 - Redis instance (Local or Cloud via Upstash)
 - PostgreSQL database (Local or Cloud via Supabase)
+- Docker & Docker Compose (Optional but recommended)
 
 ### Installation
 1. Clone the repository:
@@ -17,7 +23,7 @@ git clone https://github.com/obaidaaman/Aereo-backend-assignment.git
 cd Aereo-backend-assignment
 ```
 
-2. Install the required dependencies:
+2. Install the required dependencies (If running without Docker):
 ```bash
 uv sync 
 ```
@@ -30,24 +36,45 @@ REDIS_URL="redis://localhost:6379/0"
 
 ## How to run the application
 
-The system is built as a Monorepo, meaning the API server and the background task workers share the same codebase but must be run as two separate processes.
+The system is built as a Monorepo, meaning the API server and the background task workers share the same codebase. 
+
+### Local Development (Manual)
+Run the processes in two separate terminals:
 
 **1. Start the Web Server:**
 ```bash
 uvicorn main:app --reload
 ```
-For production (e.g., Render/AWS), use: `uvicorn main:app --host 0.0.0.0 --port 8000`
 
 **2. Start the Celery Worker:**
-Open a second terminal and run:
 ```bash
 celery -A celery_worker worker --pool=threads --concurrency=10 --loglevel=info
 ```
-*(Note: `--pool=threads` is used to prevent macOS multiprocessing issues. On Linux, this flag can be omitted to use the default prefork pool).*
+*(Note: `--pool=threads` is used locally on macOS to prevent multiprocessing bugs).*
+
+### Local Development (Docker Compose)
+To spin up both the API and the Worker seamlessly:
+```bash
+docker-compose up --build
+```
+
+### Production Deployment (e.g., Render Free Tier)
+To fit within strict free-tier memory constraints (512MB RAM), the `Dockerfile` is configured to run both the Celery worker (limited to a single process) and the FastAPI server simultaneously in the same container using a shell operator:
+```bash
+CMD celery -A celery_worker worker --pool=solo --loglevel=info & uvicorn main:app --host 0.0.0.0 --port $PORT
+```
+This allows the complete distributed architecture to run on a single $0 cloud instance.
+
+## Graceful Degradation: Celery vs Background Tasks
+
+The system features an intelligent fallback mechanism to ensure high availability:
+
+- **When Redis is UP (Primary Flow):** The application relies on **Celery**. The API Controller verifies the Redis connection via a `ping()`. If successful, the JSON payload is dispatched to the Celery Message Queue, leveraging the highly scalable Fan-out architecture for distributed generation.
+- **When Redis is DOWN (Fallback Flow):** If the Redis ping fails or connection times out, the application does not crash. Instead, it gracefully degrades to using FastAPI's native `background_tasks`. To ensure generation speed remains fast without Celery, the fallback function utilizes `concurrent.futures.ThreadPoolExecutor` to process certificates in parallel threads before syncing the results to the database sequentially.
 
 ## How to run tests
 
-You can verify that the API and background workers are communicating properly using manual cURL requests or API clients like Postman. 
+You can verify that the API is communicating properly using manual cURL requests or API clients like Postman. 
 
 To test if the application is running and the database connection is active:
 ```bash
@@ -60,14 +87,62 @@ You can submit a batch of recipients using the `POST /api/job/certificate` endpo
 
 **Request:**
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/job/certificate" \
+curl -X POST "https://aereo-backend-assignment.onrender.com/api/job/certificate" \
      -H "Content-Type: application/json" \
      -d '{
            "event_name": "Backend Architecture Masterclass",
            "date": "10 October 2026",
            "recipients": [
              {"name": "Aman Obaid", "email": "aman@example.com"},
-             {"name": "John Doe", "email": "john@example.com"}
+             {"name": "Sarah Connor", "email": "sarah@example.com"},
+             {"name": "John Doe", "email": "john@example.com"},
+             {"name": "Bruce Wayne", "email": "bruce@example.com"},
+             {"name": "Clark Kent", "email": "clark@example.com"},
+             {"name": "Diana Prince", "email": "diana@example.com"},
+             {"name": "Barry Allen", "email": "barry@example.com"},
+             {"name": "Arthur Curry", "email": "arthur@example.com"},
+             {"name": "Victor Stone", "email": "victor@example.com"},
+             {"name": "Hal Jordan", "email": "hal@example.com"},
+             {"name": "Oliver Queen", "email": "oliver@example.com"},
+             {"name": "Tony Stark", "email": "tony@example.com"},
+             {"name": "Steve Rogers", "email": "steve@example.com"},
+             {"name": "Natasha Romanoff", "email": "natasha@example.com"},
+             {"name": "Bruce Banner", "email": "banner@example.com"},
+             {"name": "Thor Odinson", "email": "thor@example.com"},
+             {"name": "Clint Barton", "email": "clint@example.com"},
+             {"name": "Peter Parker", "email": "peter@example.com"},
+             {"name": "Stephen Strange", "email": "strange@example.com"},
+             {"name": "Wanda Maximoff", "email": "wanda@example.com"},
+             {"name": "Vision", "email": "vision@example.com"},
+             {"name": "Sam Wilson", "email": "sam@example.com"},
+             {"name": "Bucky Barnes", "email": "bucky@example.com"},
+             {"name": "Scott Lang", "email": "scott@example.com"},
+             {"name": "Hope van Dyne", "email": "hope@example.com"},
+             {"name": "TChalla", "email": "tchalla@example.com"},
+             {"name": "Carol Danvers", "email": "carol@example.com"},
+             {"name": "Nick Fury", "email": "fury@example.com"},
+             {"name": "Maria Hill", "email": "maria@example.com"},
+             {"name": "Phil Coulson", "email": "phil@example.com"},
+             {"name": "Matt Murdock", "email": "matt@example.com"},
+             {"name": "Jessica Jones", "email": "jessica@example.com"},
+             {"name": "Luke Cage", "email": "luke@example.com"},
+             {"name": "Danny Rand", "email": "danny@example.com"},
+             {"name": "Frank Castle", "email": "frank@example.com"},
+             {"name": "Marc Spector", "email": "marc@example.com"},
+             {"name": "Kamala Khan", "email": "kamala@example.com"},
+             {"name": "Miles Morales", "email": "miles@example.com"},
+             {"name": "Gwen Stacy", "email": "gwen@example.com"},
+             {"name": "Eddie Brock", "email": "eddie@example.com"},
+             {"name": "Reed Richards", "email": "reed@example.com"},
+             {"name": "Sue Storm", "email": "sue@example.com"},
+             {"name": "Johnny Storm", "email": "johnny@example.com"},
+             {"name": "Ben Grimm", "email": "ben@example.com"},
+             {"name": "Charles Xavier", "email": "charles@example.com"},
+             {"name": "Logan", "email": "logan@example.com"},
+             {"name": "Ororo Munroe", "email": "ororo@example.com"},
+             {"name": "Jean Grey", "email": "jean@example.com"},
+             {"name": "Scott Summers", "email": "summers@example.com"},
+             {"name": "Hank McCoy", "email": "hank@example.com"}
            ]
          }'
 ```

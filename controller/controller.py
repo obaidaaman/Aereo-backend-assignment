@@ -9,8 +9,10 @@ from database.db import SessionLocal
 from celery_worker import master_certificate_generator
 from utils import robust_draw_certificate
 from fastapi.responses import FileResponse
-from fastapi.responses import FileResponse
 from dotenv import load_dotenv
+from fastapi.responses import RedirectResponse
+import boto3
+
 load_dotenv()
 
 def generate_certificate_controller(data: CertificateModel, background_tasks: BackgroundTasks, db: Session):
@@ -62,7 +64,7 @@ import concurrent.futures
 def generate_certificate(data: CertificateModel, job_id: str):
     os.makedirs("certificates", exist_ok=True)
     db = SessionLocal()
-    
+  
     try:
         print(f"Background Processing started for job {job_id}")
         
@@ -74,7 +76,6 @@ def generate_certificate(data: CertificateModel, job_id: str):
         recipients: list[Recipient] = data.recipients
         cert_records_data = []
 
-        # Step 1: Pre-create all certificates in DB synchronously
         for recipient in recipients:
             cert_record = Certificate(
                 job_id=job_id,
@@ -87,7 +88,7 @@ def generate_certificate(data: CertificateModel, job_id: str):
             db.refresh(cert_record)
             cert_records_data.append((recipient, str(cert_record.id)))
 
-        # Call Function for for thread
+        
         def draw_cert(recipient, cert_id):
             file_name = f"certificates/cert_{cert_id}.png"
             try:
@@ -98,8 +99,11 @@ def generate_certificate(data: CertificateModel, job_id: str):
                     certificate_id=cert_id,
                     output_path=file_name
                 )
-                return cert_id, "SUCCESS", file_name, None
+                from utils import upload_certificate_to_cloud
+                final_file_url = upload_certificate_to_cloud(file_name, f"cert_{cert_id}.png")
+                return cert_id, "SUCCESS", final_file_url, None
             except Exception as e:
+                print(f"Error generating certificate for {recipient.name}: {str(e)}")
                 return cert_id, "FAILED", None, str(e)
 
         
@@ -182,9 +186,32 @@ def downlaod_certificate_controller(cert_id : str, db :Session):
         raise HTTPException(status_code = 400, detail = "Certificate is not ready yet")
     
     file_path = cert.file_url
+    
+    if file_path.startswith("s3://"):
+        
+        
+        bucket = file_path.split("/")[2]
+        file_name = file_path.split("/")[-1]
+        
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=os.getenv("SUPABASE_S3_ENDPOINT_URL"),
+            aws_access_key_id=os.getenv("SUPABASE_S3_ACCESS_KEY"),
+            aws_secret_access_key=os.getenv("SUPABASE_S3_SECRET_KEY"),
+            region_name="auto"
+        )
+        try:
+            url = s3.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': bucket, 'Key': file_name},
+                ExpiresIn=3600
+            )
+            return RedirectResponse(url=url)
+        except Exception as e:
+             raise HTTPException(status_code=500, detail="Failed to generate cloud download URL")
+             
     if not os.path.exists(file_path):
         raise HTTPException(status_code = 404, detail = "Certificate file not found")
     
-
     return FileResponse(path=file_path, filename=f"{cert.recipient_name}_certificate.png", media_type="image/png")
     
