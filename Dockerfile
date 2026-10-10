@@ -23,4 +23,4 @@ COPY . .
 
 EXPOSE 8000
 
-CMD celery -A celery_worker worker --loglevel=info & uvicorn main:app --host 0.0.0.0 --port $PORT
+CMD celery -A celery_worker worker --pool=solo --loglevel=info & uvicorn main:app --host 0.0.0.0 --port $PORT
