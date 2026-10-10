@@ -32,21 +32,35 @@ uv sync
 ```env
 POSTGRESQL_URL="postgresql://user:password@host:port/dbname"
 REDIS_URL="redis://localhost:6379/0" 
+# Cloud Storage variables (Optional, defaults to local OS directory if omitted)
+SUPABASE_S3_ENDPOINT_URL="https://<project-ref>.supabase.co/storage/v1/s3"
+SUPABASE_S3_ACCESS_KEY="<your-access-key>"
+SUPABASE_S3_SECRET_KEY="<your-secret-key>"
+SUPABASE_S3_BUCKET_NAME="certificates"
 ```
+
+> [!NOTE]
+> **Zero Configuration Local Mode:** If no `.env` file is present, the application will automatically fall back to running entirely locally. It will create a local SQLite database (`aereo_local.db`), connect to a local Redis server (`localhost:6379`), and save the generated certificates to the local `certificates/` folder on your disk. Furthermore, even if you do not have Redis installed or a Celery worker running, the API will not crash! It will gracefully degrade and process everything using FastAPI's built-in `background_tasks`.
+
 
 ## How to run the application
 
 The system is built as a Monorepo, meaning the API server and the background task workers share the same codebase. 
 
 ### Local Development (Manual)
-Run the processes in two separate terminals:
+Run the processes in separate terminals:
 
-**1. Start the Web Server:**
+**1. Start the Redis Server (If running locally):**
+```bash
+redis-server
+```
+
+**2. Start the Web Server:**
 ```bash
 uvicorn main:app --reload
 ```
 
-**2. Start the Celery Worker:**
+**3. Start the Celery Worker:**
 ```bash
 celery -A celery_worker worker --pool=threads --concurrency=10 --loglevel=info
 ```
@@ -186,3 +200,6 @@ curl -O -J "http://127.0.0.1:8000/api/job/download/{cert_id}"
 
 4. **Robust Retries:** 
    File I/O and image generation can face temporary glitches. The core `robust_draw_certificate` function is wrapped with the `tenacity` library, automatically retrying up to 3 times before committing a failure status to the database.
+
+5. **Cloud Object Storage Strategy:** 
+   Ephemeral deployments (like Render) do not share disk volumes between web servers and background workers. To prevent "File Not Found" errors in production, the application dynamically uploads generated certificates to **Supabase S3 Storage**. The API intercepts `s3://` URLs and generates secure presigned URLs on the fly via `boto3`, gracefully redirecting the user to download the file directly from the cloud. In local development (if env vars are omitted), it safely defaults to the local OS directory.
